@@ -45,7 +45,10 @@ func mainHandle(w http.ResponseWriter, req *http.Request) {
 		cafe = found
 	}
 
-	count = min(count, len(cafe))
+	if count > len(cafe) {
+		count = len(cafe)
+	}
+
 	answer := strings.Join(cafe[:count], ",")
 	io.WriteString(w, answer)
 }
