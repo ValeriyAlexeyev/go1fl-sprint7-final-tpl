@@ -1,139 +1,56 @@
 package main
 
 import (
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestCafeNegative(t *testing.T) {
-	handler := http.HandlerFunc(mainHandle)
-
-	requests := []struct {
-		request string
-		status  int
-		message string
-	}{
-		{"/cafe", http.StatusBadRequest, "unknown city"},
-		{"/cafe?city=omsk", http.StatusBadRequest, "unknown city"},
-		{"/cafe?city=tula&count=na", http.StatusBadRequest, "incorrect count"},
-	}
-
-	for _, v := range requests {
-		response := httptest.NewRecorder()
-		req := httptest.NewRequest("GET", v.request, nil)
-		handler.ServeHTTP(response, req)
-
-		assert.Equal(t, v.status, response.Code)
-		assert.Equal(t, v.message, strings.TrimSpace(response.Body.String()))
-	}
+var cafeList = map[string][]string{
+	"moscow": {"Мир кофе", "Сладкоежка", "Кофе и завтраки", "Сытый студент", "Ложка и вилка"},
+	"tula":   {"Пир и мир", "Красиво есть не запретишь", "Поздний завтрак"},
 }
 
-func TestCafeWhenOk(t *testing.T) {
-	handler := http.HandlerFunc(mainHandle)
+func mainHandle(w http.ResponseWriter, req *http.Request) {
+	var err error
 
-	requests := []string{
-		"/cafe?count=2&city=moscow",
-		"/cafe?city=tula",
-		"/cafe?city=moscow&search=ложка",
+	count := 25
+	countStr := req.FormValue("count")
+
+	if countStr != "" {
+		count, err = strconv.Atoi(countStr)
+		if err != nil {
+			http.Error(w, "incorrect count", http.StatusBadRequest)
+			return
+		}
 	}
 
-	for _, v := range requests {
-		response := httptest.NewRecorder()
-		req := httptest.NewRequest("GET", v, nil)
-
-		handler.ServeHTTP(response, req)
-
-		assert.Equal(t, http.StatusOK, response.Code)
+	city := req.FormValue("city")
+	cafe, ok := cafeList[city]
+	if !ok {
+		http.Error(w, "unknown city", http.StatusBadRequest)
+		return
 	}
+
+	if search := req.FormValue("search"); search != "" {
+		var found []string
+
+		for _, v := range cafe {
+			if strings.Contains(strings.ToLower(v), strings.ToLower(search)) {
+				found = append(found, v)
+			}
+		}
+
+		cafe = found
+	}
+
+	count = min(count, len(cafe))
+	answer := strings.Join(cafe[:count], ",")
+	io.WriteString(w, answer)
 }
 
-func TestCafeCount(t *testing.T) {
-	handler := http.HandlerFunc(mainHandle)
-
-	requests := []struct {
-		count int
-		want  int
-	}{
-		{count: 0, want: 0},
-		{count: 1, want: 1},
-		{count: 2, want: 2},
-		{count: 100, want: len(cafeList["moscow"])},
-	}
-
-	for _, v := range requests {
-		response := httptest.NewRecorder()
-		req := httptest.NewRequest(
-			"GET",
-			"/cafe?city=moscow&count="+strconv.Itoa(v.count),
-			nil,
-		)
-
-		handler.ServeHTTP(response, req)
-
-		require.Equal(t, http.StatusOK, response.Code)
-
-		body := strings.TrimSpace(response.Body.String())
-
-		var cafes []string
-		if body == "" {
-			cafes = []string{}
-		} else {
-			cafes = strings.Split(body, ",")
-		}
-
-		assert.Equal(t, v.want, len(cafes))
-	}
-}
-
-func TestCafeSearch(t *testing.T) {
-	handler := http.HandlerFunc(mainHandle)
-
-	requests := []struct {
-		search    string
-		wantCount int
-	}{
-		{search: "фасоль", wantCount: 0},
-		{search: "кофе", wantCount: 2},
-		{search: "вилка", wantCount: 1},
-	}
-
-	for _, v := range requests {
-		response := httptest.NewRecorder()
-		req := httptest.NewRequest(
-			"GET",
-			"/cafe?city=moscow&search="+v.search,
-			nil,
-		)
-
-		handler.ServeHTTP(response, req)
-
-		require.Equal(t, http.StatusOK, response.Code)
-
-		body := strings.TrimSpace(response.Body.String())
-
-		var cafes []string
-		if body == "" {
-			cafes = []string{}
-		} else {
-			cafes = strings.Split(body, ",")
-		}
-
-		assert.Equal(t, v.wantCount, len(cafes))
-
-		for _, cafe := range cafes {
-			assert.True(
-				t,
-				strings.Contains(
-					strings.ToLower(cafe),
-					strings.ToLower(v.search),
-				),
-			)
-		}
-	}
+func main() {
+	http.HandleFunc("/cafe", mainHandle)
+	http.ListenAndServe(":8080", nil)
 }
